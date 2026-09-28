@@ -1,0 +1,26 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Windows;
+namespace Mon3trDesktop {
+    static class Tests {
+        static void Check(bool condition,string message){if(!condition)throw new Exception(message);}
+        public static int Run(){Directory.CreateDirectory(System.IO.Path.Combine(Program.Root,"qa"));var log=new List<string>();try{
+            foreach(var sample in new[]{Tuple.Create(4,59,"晚上好"),Tuple.Create(5,0,"早上好"),Tuple.Create(11,59,"早上好"),Tuple.Create(12,0,"下午好"),Tuple.Create(17,59,"下午好"),Tuple.Create(18,0,"晚上好"),Tuple.Create(0,0,"晚上好")}){var local=new DateTimeOffset(2026,9,25,sample.Item1,sample.Item2,0,TimeSpan.FromHours(8));Check(BeijingClock.Greeting(local.ToUniversalTime())==sample.Item3,"Beijing greeting boundary "+sample.Item1+":"+sample.Item2);}
+            Check(BeijingClock.At(new DateTimeOffset(2026,9,25,21,0,0,TimeSpan.Zero)).Date==new DateTime(2026,9,26),"Beijing next-day conversion");log.Add("PASS: Beijing UTC+8 independent of system timezone, all greeting boundaries and midnight rollover");
+            using(var iconStream=Assembly.GetExecutingAssembly().GetManifestResourceStream("mon3tr.ico"))using(var icon=new System.Drawing.Icon(iconStream,32,32))using(var image=icon.ToBitmap()){Check(image.Width==32&&image.Height==32,"tray icon size");Check(image.GetPixel(0,0).A==0,"transparent icon border");}log.Add("PASS: embedded portrait tray icon decodes with transparent border");
+            var a=Assets.Load();Check(a.Frames.Length==132,"All new frames retained");Check(a.Width==356&&a.Height==289,"Compact cache");Check(a.Durations.Sum()>2.18&&a.Durations.Sum()<2.23,"Native timing");
+            foreach(var frame in a.Frames){Check(frame[3]==0,"Transparent border");Check(frame.Where((v,i)=>i%4==3&&v>128).Count()>5000,"Character retained");}log.Add("PASS: 132 source frames, native timestamps, transparency, complete character");
+            foreach(var interval in new[]{1.0/60,1.0/144,1.0/30}){var player=new FrameStepper(a.Durations);var sequence=new List<int>();for(double t=0;t<12&&!player.Finished;t+=interval)if(player.Advance(t)&&!player.Finished)sequence.Add(player.Index);Check(sequence.SequenceEqual(Enumerable.Range(0,132)),"Frame sequence at "+interval);}
+            var stalled=new FrameStepper(a.Durations);var seen=new List<int>();double time=0;while(!stalled.Finished){if(stalled.Advance(time)&&!stalled.Finished)seen.Add(stalled.Index);time+=seen.Count==30?.2:1.0/60;}Check(seen.SequenceEqual(Enumerable.Range(0,132)),"Do not skip after stall");log.Add("PASS: sequential playback at 30/60/144 Hz and after a 200 ms stall");
+            var work=new Rect(0,0,1920,1040);double scale=.55;var low=Layout.ClampPet(new Point(-500,-500),a.Body,scale,work);var high=Layout.ClampPet(new Point(3000,2000),a.Body,scale,work);Check(Layout.Body(low,a.Body,scale).Left==0&&Layout.Body(low,a.Body,scale).Top==0,"Reach left/top");Check(Math.Abs(Layout.Body(high,a.Body,scale).Right-1920)<.001&&Math.Abs(Layout.Body(high,a.Body,scale).Bottom-1040)<.001,"Reach right/bottom");
+            Check(Layout.Touching(new Rect(0,200,100,120),work)==Edge.Left,"left dock");Check(Layout.Touching(new Rect(1820,200,100,120),work)==Edge.Right,"right dock");Check(Layout.Touching(new Rect(500,0,100,120),work)==Edge.Top,"top dock");Check(Layout.Touching(new Rect(500,920,100,120),work)==Edge.Bottom,"bottom dock");Check(Layout.Touching(new Rect(500,500,100,120),work)==Edge.None,"no premature hide");log.Add("PASS: actual silhouette reaches all 4 edges; docking threshold");
+            bool left;var size=new Size(236,180);Check(work.Contains(Layout.Bubble(new Rect(1800,900,100,120),size,work,out left))&&left,"bubble right");Check(work.Contains(Layout.Bubble(new Rect(0,0,100,120),size,work,out left))&&!left,"bubble left/top");var second=new Rect(-1920,-300,1920,1080);Check(second.Contains(Layout.Bubble(new Rect(-1900,-300,100,120),size,second,out left)),"negative monitor");log.Add("PASS: small bubble stays on screen including negative monitor coordinates");
+            var text=UsageClient.Format(Json.Parse("{\"rateLimitsByLimitId\":{\"codex\":{\"primary\":{\"usedPercent\":88,\"windowDurationMins\":10080},\"secondary\":null}}}"));Check(text.Contains("12%")&&!text.Contains("其他 ChatGPT"),"compact usage");Check(!UsageClient.Format(Json.Parse("{\"rateLimits\":{\"primary\":{\"usedPercent\":null}}}")).Contains("100%"),"missing usage");log.Add("PASS: compact live-usage format; missing values not fabricated");
+            foreach(var name in new[]{"voice-deploy.wav","voice-greeting.wav","voice-tap.wav"})using(var s=Assembly.GetExecutingAssembly().GetManifestResourceStream(name))using(var r=new BinaryReader(s)){Check(new string(r.ReadChars(4))=="RIFF","WAV resource");r.ReadInt32();Check(new string(r.ReadChars(4))=="WAVE","WAVE resource");}using(var voices=new VoiceBank()){}log.Add("PASS: all 3 embedded WAV voices decode successfully");
+            File.WriteAllLines(System.IO.Path.Combine(Program.Root,"qa/v2-tests.txt"),log);return 0;
+        }catch(Exception e){log.Add("FAIL: "+e);File.WriteAllLines(System.IO.Path.Combine(Program.Root,"qa/v2-tests.txt"),log);return 1;}}
+    }
+}
